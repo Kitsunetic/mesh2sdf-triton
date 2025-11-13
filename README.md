@@ -61,3 +61,19 @@ python example/test.py
 - Compute the signed distance field again with the kept triangle mesh as the
   final output. In this way, the signed distance field (SDF) is computed for a
   non-watertight input mesh.
+
+
+## Citation
+
+```
+@article {Wang-Sig2022,
+  title      = {Dual Octree Graph Networks for Learning Adaptive Volumetric
+                Shape Representations},
+  author     = {Wang, Peng-Shuai and Liu, Yang and Tong, Xin},
+  journal    = {ACM Transactions on Graphics (SIGGRAPH)},
+  volume     = {41},
+  number     = {4},
+  year       = {2022},
+}
+
+```
