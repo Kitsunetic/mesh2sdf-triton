@@ -6,3 +6,8 @@ requires = [
 ]
 
 build-backend = "setuptools.build_meta"
+
+[tool.basedpyright]
+venvPath = "."
+venv = ".venv"
+pythonVersion = "3.10"
