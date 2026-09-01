@@ -1,6 +1,6 @@
-from setuptools import setup
 # Available at setup time due to pyproject.toml
 from pybind11.setup_helpers import Pybind11Extension, build_ext
+from setuptools import setup
 
 __version__ = '1.1.0'
 
@@ -30,12 +30,19 @@ setup(
     ext_modules=ext_modules,
     cmdclass={'build_ext': build_ext},
     zip_safe=False,
-    python_requires='>=3.6',
+    python_requires='>=3.10',
     install_requires=[
         "numpy",
         "trimesh",
         'scikit-image',
+        'typing-extensions>=4.4',
     ],
+    extras_require={
+        'cuda': [
+            'torch>=2.2',
+            'triton>=2.2; platform_system == "Linux"',
+        ],
+    },
     classifiers=[
         'Programming Language :: Python :: 3',
         'License :: OSI Approved :: MIT License',

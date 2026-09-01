@@ -31,6 +31,12 @@ compilers are needed to build the code. Supported compilers are listed
     pip install ./mesh2sdf
     ```
 
+- To enable CUDA acceleration on Linux, install the optional PyTorch and Triton
+  dependencies:
+    ``` shell
+    pip install "mesh2sdf[cuda]"
+    ```
+
 ## Example
 
 After installing `mesh2sdf`, run the following command to process an input mesh
@@ -44,6 +50,16 @@ python example/test.py
 
 
 ## How does it work?
+
+For watertight meshes, `mesh2sdf.compute` automatically uses CUDA when PyTorch,
+Triton, and a CUDA device are available. Use `backend="cpu"` to select the
+original C++ implementation or `backend="cuda"` to request acceleration
+explicitly. Grids smaller than 64 use the C++ path because GPU launch overhead
+is larger than the work saved.
+
+```python
+sdf = mesh2sdf.compute(vertices, faces, size=128, backend="cuda", device="cuda:0")
+```
 
 - Given an input mesh, we first compute the **unsigned** distance field with the
   fast sweeping algorithm implemented by

@@ -1,1 +1,1 @@
-from .compute import compute
+from .compute import compute as compute
