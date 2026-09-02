@@ -8,7 +8,7 @@ import triton
 import triton.language as tl
 from torch import Tensor
 
-from ._triton import _segment_distance_squared
+from ._distance import _segment_distance_squared
 
 
 @triton.jit
@@ -43,8 +43,11 @@ def _triangle_distance(triangles, triangle_ids, valid, px, py, pz) -> tl.tensor:
     ab = _segment_distance_squared(px, py, pz, ax, ay, az, bx, by, bz)
     ac = _segment_distance_squared(px, py, pz, ax, ay, az, cx, cy, cz)
     bc = _segment_distance_squared(px, py, pz, bx, by, bz, cx, cy, cz)
-    edge = tl.where(w23 > 0.0, tl.minimum(ab, ac),
-                    tl.where(w31 > 0.0, tl.minimum(ab, bc), tl.minimum(ac, bc)))
+    edge = tl.where(
+        w23 > 0.0,
+        tl.minimum(ab, ac),
+        tl.where(w31 > 0.0, tl.minimum(ab, bc), tl.minimum(ac, bc)),
+    )
     inside = (w23 >= 0.0) & (w31 >= 0.0) & (w12 >= 0.0)
     squared = tl.where(inside, plane, edge)
     return tl.where(valid, tl.sqrt(tl.maximum(squared, 0.0)), float("inf"))
@@ -52,8 +55,15 @@ def _triangle_distance(triangles, triangle_ids, valid, px, py, pz) -> tl.tensor:
 
 @triton.jit
 def _sweep_kernel(
-    triangles, distances, closest, size: tl.constexpr, diagonal,
-    di: tl.constexpr, dj: tl.constexpr, dk: tl.constexpr, block: tl.constexpr,
+    triangles,
+    distances,
+    closest,
+    size: tl.constexpr,
+    diagonal,
+    di: tl.constexpr,
+    dj: tl.constexpr,
+    dk: tl.constexpr,
+    block: tl.constexpr,
 ):
     ids = tl.program_id(0) * block + tl.arange(0, block)
     edge = size - 1
@@ -88,24 +98,47 @@ def _sweep_kernel(
 
 
 def _launch(
-    kernel: Callable[..., None], triangles: Tensor, distances: Tensor,
-    closest: Tensor, size: int, diagonal: int, direction: tuple[int, int, int],
+    kernel: Callable[..., None],
+    triangles: Tensor,
+    distances: Tensor,
+    closest: Tensor,
+    size: int,
+    diagonal: int,
+    direction: tuple[int, int, int],
 ) -> None:
-    kernel(triangles, distances, closest, size, diagonal, *direction, 128,
-           enable_fp_fusion=False)
+    kernel(
+        triangles,
+        distances,
+        closest,
+        size,
+        diagonal,
+        *direction,
+        128,
+        enable_fp_fusion=False,
+    )
 
 
 def sweep_distances(
-    triangles: Tensor, distances: Tensor, closest: Tensor, size: int,
+    triangles: Tensor,
+    distances: Tensor,
+    closest: Tensor,
+    size: int,
 ) -> None:
     directions = (
-        (1, 1, 1), (-1, -1, -1), (1, 1, -1), (-1, -1, 1),
-        (1, -1, 1), (-1, 1, -1), (1, -1, -1), (-1, 1, 1),
+        (1, 1, 1),
+        (-1, -1, -1),
+        (1, 1, -1),
+        (-1, -1, 1),
+        (1, -1, 1),
+        (-1, 1, -1),
+        (1, -1, -1),
+        (-1, 1, 1),
     )
     grid = ((size - 1) * (size - 1) + 127) // 128
     for _ in range(2):
         for direction in directions:
             for diagonal in range(3, 3 * size - 2):
                 kernel: Callable[..., None] = _sweep_kernel[(grid,)]
-                _launch(kernel, triangles, distances, closest,
-                        size, diagonal, direction)
+                _launch(
+                    kernel, triangles, distances, closest, size, diagonal, direction
+                )

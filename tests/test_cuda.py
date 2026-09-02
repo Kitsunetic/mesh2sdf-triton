@@ -5,6 +5,7 @@ import torch
 import mesh2sdf
 import mesh2sdf.core
 from benchmarks.autoresearch import Case, fixed_cases
+from mesh2sdf._distance import initialize_distance_grid
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
@@ -36,3 +37,27 @@ def test_cpu_backend_is_unchanged_when_explicitly_selected() -> None:
     # Then the result is bitwise identical
     assert isinstance(result, np.ndarray)
     np.testing.assert_array_equal(result, reference)
+
+
+@pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
+def test_distance_initialization_keeps_first_triangle_on_exact_tie() -> None:
+    # Given two identical triangles with one shared narrow-band AABB
+    triangle = torch.tensor(
+        [[[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]]],
+        dtype=torch.float32,
+        device="cuda",
+    )
+    triangles = triangle.repeat(2, 1, 1)
+    bounds = torch.tensor(
+        [[1, 6, 1, 6, 3, 5], [1, 6, 1, 6, 3, 5]],
+        dtype=torch.int32,
+        device="cuda",
+    )
+
+    # When the narrow-band distances are initialized
+    distances, closest = initialize_distance_grid(triangles, bounds, size=8)
+
+    # Then exact ties choose the first triangle and untouched cells keep sentinels
+    assert int(closest.reshape(8, 8, 8)[4, 4, 4]) == 0
+    assert int(closest.reshape(8, 8, 8)[0, 0, 0]) == -1
+    assert float(distances.reshape(8, 8, 8)[0, 0, 0]) == 6.0
