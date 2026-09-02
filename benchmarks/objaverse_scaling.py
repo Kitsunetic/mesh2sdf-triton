@@ -71,6 +71,11 @@ def scalability_score(accuracy_passes: int, minimum_speedup: float) -> float:
     return accuracy_passes * ACCURACY_TIER + speed_tiebreaker
 
 
+def accuracy_gated_speedup(speedup: float, *, accuracy_pass: bool) -> float:
+    """Make an inaccurate dense result ineligible for performance retention."""
+    return speedup if accuracy_pass else 0.0
+
+
 def _load_case(spec: CaseSpec) -> tuple[NDArray[np.float32], NDArray[np.uint32]]:
     scene = trimesh.load_scene(
         OBJAVERSE_ROOT / f"{spec.uid}.glb", process=False, skip_materials=True
@@ -208,6 +213,9 @@ def verify() -> int:
                 "cases": rows,
                 "accuracy_passes": accuracy_passes,
                 "minimum_speedup": minimum_speedup,
+                "dense_speedup": accuracy_gated_speedup(
+                    rows[-1]["speedup"], accuracy_pass=rows[-1]["accuracy_pass"]
+                ),
                 "scalability_score": scalability_score(
                     accuracy_passes, minimum_speedup
                 ),
