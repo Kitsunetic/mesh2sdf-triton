@@ -5,6 +5,7 @@ from __future__ import annotations
 import numpy as np
 import torch
 from numpy.typing import NDArray
+from torch import Tensor
 
 from ._distance import initialize_distance_grid
 from ._sweep import sweep_distances
@@ -19,15 +20,25 @@ def is_available() -> bool:
     return torch.cuda.is_available()
 
 
-def _projected_sign_bounds(
-    triangles: NDArray[np.float64],
-    spacing: float,
-    size: int,
-) -> NDArray[np.int32]:
-    scaled_yz = (triangles[:, :, 1:] + 1.0) / spacing
-    lower = np.clip(np.ceil(scaled_yz.min(axis=1)), 0, size - 1).astype(np.int32)
-    upper = np.clip(np.floor(scaled_yz.max(axis=1)), 0, size - 1).astype(np.int32)
-    return np.stack((lower[:, 0], upper[:, 0], lower[:, 1], upper[:, 1]), axis=1)
+def _triangle_bounds(triangles: Tensor, size: int) -> tuple[Tensor, Tensor]:
+    spacing = float(np.float32(2.0 / size))
+    scaled = (triangles.to(torch.float64) + 1.0) / spacing
+    minimum, maximum = torch.aminmax(scaled, dim=1)
+
+    lower = (torch.trunc(minimum).to(torch.int32) - 1).clamp(0, size - 1)
+    upper = (torch.trunc(maximum).to(torch.int32) + 2).clamp(0, size - 1)
+    distance = torch.stack(
+        (lower[:, 0], upper[:, 0], lower[:, 1], upper[:, 1], lower[:, 2], upper[:, 2]),
+        dim=1,
+    )
+
+    sign_lower = torch.ceil(minimum[:, 1:]).clamp(0, size - 1).to(torch.int32)
+    sign_upper = torch.floor(maximum[:, 1:]).clamp(0, size - 1).to(torch.int32)
+    sign = torch.stack(
+        (sign_lower[:, 0], sign_upper[:, 0], sign_lower[:, 1], sign_upper[:, 1]),
+        dim=1,
+    )
+    return distance, sign
 
 
 def compute_cuda(
@@ -41,21 +52,7 @@ def compute_cuda(
     vertex_tensor = torch.as_tensor(vertices, dtype=torch.float32, device=device)
     face_tensor = torch.as_tensor(faces.astype(np.int64, copy=False), device=device)
     triangles = vertex_tensor[face_tensor].contiguous()
-    spacing = float(np.float32(2.0 / size))
-    triangle_array = vertices[faces.astype(np.int64, copy=False)].astype(np.float64)
-    scaled = (triangle_array + 1.0) / spacing
-    lower = np.clip(np.trunc(scaled.min(axis=1)).astype(np.int32) - 1, 0, size - 1)
-    upper = np.clip(np.trunc(scaled.max(axis=1)).astype(np.int32) + 2, 0, size - 1)
-    bounds_array = np.stack(
-        (lower[:, 0], upper[:, 0], lower[:, 1], upper[:, 1], lower[:, 2], upper[:, 2]),
-        axis=1,
-    )
-    bounds = torch.as_tensor(bounds_array, dtype=torch.int32, device=device)
-    sign_bounds = torch.as_tensor(
-        _projected_sign_bounds(triangle_array, spacing, size),
-        dtype=torch.int32,
-        device=device,
-    )
+    bounds, sign_bounds = _triangle_bounds(triangles, size)
     result, closest = initialize_distance_grid(triangles, bounds, size)
     sweep_distances(triangles, result, closest, size)
     apply_signs(triangles, sign_bounds, result, size)

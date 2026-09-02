@@ -9,18 +9,21 @@ from benchmarks.autoresearch import Case, fixed_cases
 from mesh2sdf._distance import initialize_distance_grid
 
 
-def test_projected_sign_bounds_use_ceil_floor_and_clamp() -> None:
-    # Given a triangle whose projected YZ extent crosses both grid edges
-    triangles = np.array(
-        [[[-0.2, -0.74, -1.4], [0.1, -0.26, 0.1], [0.3, 0.24, 1.4]]],
-        dtype=np.float64,
+def test_triangle_bounds_match_cpp_rounding_and_clamping() -> None:
+    # Given float32 triangle coordinates whose YZ extent crosses both grid edges
+    triangles = torch.tensor(
+        [[[-0.5, -0.75, -1.5], [0.0, -0.25, 0.0], [0.5, 0.25, 1.5]]],
+        dtype=torch.float32,
     )
 
-    # When its sign-intersection bounds are computed in grid coordinates
-    bounds = cuda_backend._projected_sign_bounds(triangles, spacing=0.25, size=8)
+    # When distance and sign bounds are computed in grid coordinates
+    distance, sign = cuda_backend._triangle_bounds(triangles, size=8)
 
-    # Then lower bounds use ceil, upper bounds use floor, and both are clamped
-    np.testing.assert_array_equal(bounds, np.array([[2, 4, 0, 7]], dtype=np.int32))
+    # Then C++ trunc/ceil/floor rules and clamping are preserved
+    torch.testing.assert_close(
+        distance, torch.tensor([[1, 7, 0, 7, 0, 7]], dtype=torch.int32)
+    )
+    torch.testing.assert_close(sign, torch.tensor([[1, 5, 0, 7]], dtype=torch.int32))
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")
