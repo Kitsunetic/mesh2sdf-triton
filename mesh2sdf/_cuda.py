@@ -6,9 +6,8 @@ import numpy as np
 import torch
 from numpy.typing import NDArray
 
-from ._distance import initialize_distance_grid
 from ._sweep import sweep_distances
-from ._triton import apply_signs
+from ._triton import apply_signs, initialize_distance_grid
 
 
 class CudaBackendUnavailableError(RuntimeError):
@@ -36,8 +35,8 @@ def compute_cuda(
     lower = np.clip(np.trunc(scaled.min(axis=1)).astype(np.int32) - 1, 0, size - 1)
     upper = np.clip(np.trunc(scaled.max(axis=1)).astype(np.int32) + 2, 0, size - 1)
     bounds_array = np.stack(
-        (lower[:, 0], upper[:, 0], lower[:, 1], upper[:, 1], lower[:, 2], upper[:, 2]),
-        axis=1,
+        (lower[:, 0], upper[:, 0], lower[:, 1], upper[:, 1],
+         lower[:, 2], upper[:, 2]), axis=1,
     )
     bounds = torch.as_tensor(bounds_array, dtype=torch.int32, device=device)
     result, closest = initialize_distance_grid(triangles, bounds, size)
