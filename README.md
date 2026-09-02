@@ -1,78 +1,71 @@
-# Mesh2SDF
+# Mesh2SDF-Triton
 
-[![Downloads](https://static.pepy.tech/badge/mesh2sdf)](https://pepy.tech/project/mesh2sdf)
-[![Downloads](https://static.pepy.tech/badge/mesh2sdf/month)](https://pepy.tech/project/mesh2sdf)
-[![PyPI](https://img.shields.io/pypi/v/mesh2sdf)](https://pypi.org/project/mesh2sdf/)
+Mesh2SDF-Triton is a GPU-accelerated fork of
+[Mesh2SDF](https://github.com/wang-ps/mesh2sdf). It keeps the original public
+API and C++ backend, and adds a PyTorch + Triton backend for fast signed
+distance-field generation from watertight meshes.
 
-
-Converts an input mesh to a signed distance field. It can work with arbitrary
-meshes, even **non-watertight** meshes from ShapeNet.
-
-`mesh2sdf` is used in our paper
-[Dual Octree Graph Networks (SIGGRAPH 2022)](https://wang-ps.github.io/dualocnn)
-to generate the training data.
-Please cite our paper if you find the code useful for your research.
+The original project is a robust CPU implementation of SDFGen-style sweeping.
+This fork targets the preprocessing use case where many `size=128` grids must
+be generated from large meshes on a CUDA machine.
 
 
-## Installation
+## What changes from Mesh2SDF?
+
+| Area | Original Mesh2SDF | Mesh2SDF-Triton |
+| --- | --- | --- |
+| Accelerated backend | C++ CPU | PyTorch + Triton CUDA kernels |
+| Distance initialization | CPU triangle/voxel loops | GPU triangle-local narrow-band updates |
+| Sign computation | CPU ray-intersection counting | GPU projected-triangle intersection counting |
+| Large-mesh scaling | Work increases with face count on one CPU core | Face-dependent work stays on the GPU and is bounded by triangle grid coverage |
+| Compatibility | Original behavior | `backend="cpu"` preserves the original C++ path |
+
+The CUDA backend needs no custom CUDA extension and no `nvcc` build. Triton
+JIT-compiles kernels when they are first used for a GPU configuration, then
+reuses them on later calls.
+
+
+## Install
 
 `mesh2sdf` depends on [pybind11](https://github.com/pybind/pybind11), and C++
 compilers are needed to build the code. Supported compilers are listed
 [here](https://github.com/pybind/pybind11#supported-compilers).
 
-- Install via the following command:
-    ``` shell
-    pip install mesh2sdf
-    ```
-
-- Alternatively, install from the source code via the following commands.
-    ``` shell
-    git clone https://github.com/Kitsunetic/mesh2sdf-triton.git
-    pip install ./mesh2sdf
-    ```
-
-- To enable CUDA acceleration on Linux, install the optional PyTorch and Triton
-  dependencies:
-    ``` shell
-    pip install "mesh2sdf[cuda]"
-    ```
-
-## Example
-
-After installing `mesh2sdf`, run the following command to process an input mesh
-from ShapeNet:
+Clone this repository because the upstream PyPI package does not include the
+Triton backend:
 
 ```shell
-python example/test.py
+git clone https://github.com/Kitsunetic/mesh2sdf-triton.git
+cd mesh2sdf-triton
+pip install ".[cuda]"
 ```
 
-![Example of a mesh from ShapeNet](https://raw.githubusercontent.com/wang-ps/mesh2sdf/master/example/data/result.png)
+The package still builds the original pybind11 C++ extension, so a supported C++
+compiler is required. CUDA acceleration requires Linux, a CUDA-capable PyTorch
+installation, and Triton.
 
 
-## CUDA/Triton acceleration
+## Use the accelerated backend
 
-For grids of size 64 or larger, `backend="auto"` uses the CUDA path when
-PyTorch, Triton, and a CUDA device are available. Use `backend="cpu"` to force
-the original C++ implementation or `backend="cuda"` to require acceleration.
+Vertices must be normalized to `[-1, 1]`, as in the original project. For grids
+of size 64 or larger, `backend="auto"` selects CUDA when PyTorch, Triton, and a
+CUDA device are available.
 
-The CUDA path does not build a CUDA extension or require `nvcc`. Triton JIT
-compiles kernels on their first use for a GPU and problem shape; subsequent
-calls reuse the compiled kernels. This means first-call latency is higher than
-the warm measurements below.
+```python
+import mesh2sdf
 
-The implementation preserves the original SDFGen rules while moving the
-face-dependent work to the GPU:
+sdf = mesh2sdf.compute(
+    vertices,
+    faces,
+    size=128,
+    backend="cuda",
+    device="cuda:0",
+)
+```
 
-- It computes C++-compatible triangle bounds on the GPU in float64, preserving
-  the original `trunc`, `ceil`, `floor`, and clamp rules.
-- Each triangle initializes only its inclusive narrow-band AABB. A packed
-  `(squared_distance, triangle_id)` atomic minimum preserves the original
-  nearest-triangle and first-triangle tie behavior.
-- The eight-direction fast sweep is the same dependency order as the C++
-  implementation.
-- Sign intersections traverse each triangle's projected YZ bounds rather than
-  every triangle/grid-line pair, avoiding face-count-linear work and large
-  flattened launch indices.
+Use `backend="cpu"` for the original C++ implementation. `backend="cuda"`
+raises an error if CUDA acceleration is unavailable, which is useful in batch
+preprocessing jobs that must not silently fall back to CPU.
 
 
 ## Performance
@@ -102,32 +95,41 @@ Set `OBJAVERSE_ROOT` in that script to a local directory containing the
 benchmark GLB files before running it.
 
 
-## How does it work?
+## Why large meshes stay fast
 
-For watertight meshes, `mesh2sdf.compute` automatically uses CUDA when PyTorch,
-Triton, and a CUDA device are available. Grids smaller than 64 use the C++ path
-because GPU launch overhead is larger than the work saved.
+Mesh2SDF-Triton follows the same SDFGen-style result construction as the C++
+backend, but changes where the expensive work happens.
 
-```python
-sdf = mesh2sdf.compute(vertices, faces, size=128, backend="cuda", device="cuda:0")
-```
+1. Triangle bounds are computed from the already-uploaded triangle tensor on
+   the GPU. Float64 arithmetic preserves the C++ grid rounding rules.
+2. Distance initialization visits only the inclusive AABB around each triangle,
+   rather than evaluating every triangle at every grid voxel. A packed atomic
+   minimum selects both the nearest distance and its triangle consistently.
+3. The original eight-direction fast sweep fills the remaining grid values in
+   the same dependency order as the C++ implementation.
+4. The sign pass visits only grid lines within a triangle's YZ projection. This
+   avoids launching `face_count × size²` intersection tests; the 332,820-face
+   benchmark reduces that candidate set from 5.45 billion pairs to 12,861
+   projected cells.
 
-- Given an input mesh, we first compute the **unsigned** distance field with the
-  fast sweeping algorithm implemented by
-  [Christopher Batty (SDFGen)](https://github.com/christopherbatty/SDFGen).
-  Note that the unsigned distance field can always be reliably and accurately
-  computed even though the input mesh is non-watertight.
 
-- Then we extract the level sets with a small value **d** with the marching cube
-  algorithm. The extracted level sets are represented with triangle meshes and
-  are guaranteed to be manifold.
+## Accuracy and scope
 
-- There exist multiple connected components in the extracted meshes, and we only
-  keep the mesh with the largest bounding box.
+The accelerated signed-distance path is benchmarked on watertight meshes. It
+uses the original C++ implementation as its reference, with the error limits
+listed above. For non-watertight input, signed values are not reliable before
+repair in either backend; use `fix=True` to retain the original repair pipeline.
 
-- Compute the signed distance field again with the kept triangle mesh as the
-  final output. In this way, the signed distance field (SDF) is computed for a
-  non-watertight input mesh.
+Small grids (`size < 64`) use the C++ backend because CUDA launch overhead can
+exceed the work saved. Keep `backend="cpu"` available for CPU-only hosts and
+for a direct reference result.
+
+
+## Original project
+
+Mesh2SDF-Triton is derived from Mesh2SDF by Peng-Shuai Wang. The original
+project introduced the mesh repair and SDF workflow used here and is described
+in the paper below.
 
 
 ## Citation
