@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-import json
 import os
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Final, TypedDict
+from typing import Final
 
 import numpy as np
 from numpy.typing import NDArray
 
 REFERENCE_PYTHON_ENV: Final = "MESH2SDF_REFERENCE_PYTHON"
 _REFERENCE_PROGRAM: Final = """
-import json
 import sys
 import time
 
@@ -27,12 +25,8 @@ started = time.perf_counter()
 result = mesh2sdf.compute(payload["vertices"], payload["faces"], int(payload["size"]))
 seconds = time.perf_counter() - started
 np.save(output_path, result)
-print(json.dumps({"seconds": seconds}))
+print(seconds)
 """
-
-
-class _ReferenceMetadata(TypedDict):
-  seconds: float
 
 
 class ReferenceUnavailableError(RuntimeError):
@@ -88,12 +82,10 @@ def compute_reference(
     if completed.returncode != 0:
       message = completed.stderr.strip() or "reference interpreter failed"
       raise ReferenceUnavailableError(message)
-    raw_metadata: object = json.loads(completed.stdout)
-    if not isinstance(raw_metadata, dict):
-      raise ReferenceUnavailableError("reference interpreter returned invalid metadata")
-    seconds = raw_metadata.get("seconds")
-    if not isinstance(seconds, (int, float)):
-      raise ReferenceUnavailableError("reference interpreter did not report elapsed time")
-    metadata: _ReferenceMetadata = {"seconds": float(seconds)}
+    try:
+      seconds = float(completed.stdout.strip())
+    except ValueError:
+      message = "reference interpreter did not report elapsed time"
+      raise ReferenceUnavailableError(message)
     result = np.asarray(np.load(output_path), dtype=np.float32)
-    return result, float(metadata["seconds"])
+    return result, seconds

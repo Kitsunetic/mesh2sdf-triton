@@ -47,23 +47,30 @@ no C++ compiler requirement during installation.
 ## Install
 
 Mesh2SDF-Triton requires Linux, an NVIDIA GPU, a CUDA-capable PyTorch build,
-and Triton. Install the PyTorch build appropriate for the system first, then
-install this package:
-
-```shell
-pip install torch
-pip install mesh2sdf-triton
-```
-
-To install from a checkout:
+and Python 3.10 or newer. Install the CUDA-enabled PyTorch build selected for
+your system on the [official PyTorch installation page](https://pytorch.org/get-started/locally/),
+then install this repository:
 
 ```shell
 git clone https://github.com/Kitsunetic/mesh2sdf-triton.git
 cd mesh2sdf-triton
-pip install .
+python -m pip install .
 ```
 
-Neither command builds C++ code or requires pybind11.
+This installs the Triton-only package. It does not build C++ code, use
+pybind11, or require `nvcc`.
+
+For local development, install the test and lint tools with:
+
+```shell
+python -m pip install -e ".[dev]"
+```
+
+Verify that PyTorch can see the selected GPU before running SDF generation:
+
+```shell
+python -c "import torch; assert torch.cuda.is_available()"
+```
 
 ## Usage
 
@@ -85,6 +92,24 @@ call raises an error when the selected device cannot execute the Triton path.
 The `device` argument accepts PyTorch CUDA device strings. `fix=True` retains
 the original mesh-repair workflow and can return the repaired mesh with
 `return_mesh=True`.
+
+## Examples
+
+Generate an SDF from a mesh file. The example normalizes the mesh to the input
+domain and repairs it by default; pass `--no-fix` for a known watertight mesh.
+
+```shell
+python example/test.py input.obj --size 128 --device cuda:0
+```
+
+The command writes `input.npy` and, when repair is enabled, `input.fixed.obj`.
+To extract level-set meshes and PNG slices from the SDF, install matplotlib and
+run:
+
+```shell
+python -m pip install matplotlib
+python example/visualize_sdf.py input.npy
+```
 
 ## Implementation
 
@@ -111,15 +136,17 @@ use `fix=True` before relying on signs.
 The repository's parity and Objaverse benchmarks can compare against an
 independently installed original Mesh2SDF. Set
 `MESH2SDF_REFERENCE_PYTHON` to the interpreter in that environment so the
-reference runs in a subprocess and cannot become a package dependency:
+reference runs in a subprocess and cannot become a package dependency. Set
+`OBJAVERSE_ROOT` to the directory containing the benchmark GLB files:
 
 ```shell
+OBJAVERSE_ROOT=/path/to/objaverse-glbs \
 MESH2SDF_REFERENCE_PYTHON=/path/to/original-mesh2sdf/bin/python \
   python -B benchmarks/objaverse_scaling.py verify
 ```
 
-Set `OBJAVERSE_ROOT` to the directory containing the benchmark GLB files when
-it differs from the script's default.
+The verification command exits nonzero when an input case fails its accuracy
+thresholds or the external reference cannot run.
 
 ## Original project
 

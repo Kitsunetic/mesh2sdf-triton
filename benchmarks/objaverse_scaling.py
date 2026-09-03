@@ -28,13 +28,9 @@ from numpy.typing import NDArray
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import mesh2sdf_triton
-from benchmarks.cpp_reference import ReferenceUnavailableError, compute_reference
+from benchmarks.cpp_reference import compute_reference
 
-OBJAVERSE_ROOT: Final = Path(
-    os.environ.get(
-        "OBJAVERSE_ROOT", "/home/rvi/ns3/jaehyeok/ds/Objaverse-full/glbs/000-082"
-    )
-)
+OBJAVERSE_ROOT_ENV: Final = "OBJAVERSE_ROOT"
 ACCURACY_TIER: Final = 1000.0
 MAX_ERROR: Final = 1e-3
 MEAN_ERROR: Final = 1e-5
@@ -81,9 +77,17 @@ def accuracy_gated_speedup(speedup: float, *, accuracy_pass: bool) -> float:
     return speedup if accuracy_pass else 0.0
 
 
+def _objaverse_root() -> Path:
+    configured = os.environ.get(OBJAVERSE_ROOT_ENV)
+    if configured is None:
+        message = f"Set {OBJAVERSE_ROOT_ENV} to the directory containing benchmark GLBs"
+        raise RuntimeError(message)
+    return Path(configured)
+
+
 def _load_case(spec: CaseSpec) -> tuple[NDArray[np.float32], NDArray[np.uint32]]:
     scene = trimesh.load_scene(
-        OBJAVERSE_ROOT / f"{spec.uid}.glb", process=False, skip_materials=True
+        _objaverse_root() / f"{spec.uid}.glb", process=False, skip_materials=True
     )
     mesh = scene.to_mesh()
     mesh.merge_vertices(merge_tex=True, merge_norm=True)
@@ -225,7 +229,7 @@ def verify() -> int:
             }
         )
     )
-    return 0
+    return 0 if all(row["accuracy_pass"] for row in rows) else 1
 
 
 def guard() -> int:
@@ -248,7 +252,7 @@ def main(argv: Sequence[str]) -> int:
         spec = _find_case(uid)
         try:
             row = _compare(spec, int(size), timed=timing == "timed")
-        except (ReferenceUnavailableError, torch.AcceleratorError) as error:
+        except (RuntimeError, torch.AcceleratorError) as error:
             row = _failed_row(spec, int(size), str(error))
         print(json.dumps(row))
         return 0
