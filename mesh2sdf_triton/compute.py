@@ -1,43 +1,12 @@
-from importlib.util import find_spec
-from typing import Literal
-
 import numpy as np
 import skimage.measure
 import trimesh
 from numpy.typing import NDArray
-from typing_extensions import assert_never
-
-from .core import compute as compute_core
-
-Backend = Literal["auto", "cpu", "cuda"]
-
-
-class InvalidBackendError(ValueError):
-  """Raised when an unknown compute backend is requested."""
-
-
-def _parse_backend(backend: Backend) -> Backend:
-  match backend:
-    case "auto" | "cpu" | "cuda":
-      return backend
-    case unreachable:
-      assert_never(unreachable)
-
-
-def _cuda_available() -> bool:
-  if find_spec("torch") is None or find_spec("triton") is None:
-    return False
-  from ._cuda import is_available
-  return is_available()
 
 
 def _compute_grid(vertices: NDArray[np.generic], faces: NDArray[np.generic],
-                  size: int, backend: Backend, device: str
+                  size: int, device: str
                   ) -> NDArray[np.float32]:
-  use_cuda = size >= 64 and (
-      backend == "cuda" or (backend == "auto" and _cuda_available()))
-  if not use_cuda:
-    return compute_core(vertices, faces, size)
   from ._cuda import compute_cuda
   return compute_cuda(np.ascontiguousarray(vertices, dtype=np.float32),
                       np.ascontiguousarray(faces, dtype=np.uint32), size, device)
@@ -45,7 +14,7 @@ def _compute_grid(vertices: NDArray[np.generic], faces: NDArray[np.generic],
 
 def compute(vertices: NDArray[np.generic], faces: NDArray[np.generic], size: int = 128,
             fix: bool = False, level: float = 0.015, return_mesh: bool = False,
-            backend: Backend = "auto", device: str = "cuda"
+            device: str = "cuda"
             ) -> NDArray[np.float32] | tuple[NDArray[np.float32], trimesh.Trimesh]:
   r''' Converts a input mesh to signed distance field (SDF).
 
@@ -59,16 +28,11 @@ def compute(vertices: NDArray[np.generic], faces: NDArray[np.generic], size: int
         with a default value of 0.015 (as a reference 2/128 = 0.015625). And the
         recommended default value is 2/size.
     return_mesh (bool): If True, also return the fixed mesh.
-    backend (str): ``"auto"`` uses CUDA when PyTorch and Triton are available,
-        ``"cpu"`` selects the original C++ implementation, and ``"cuda"``
-        requires the accelerated implementation.
-    device (str): PyTorch CUDA device used by the accelerated implementation.
+    device (str): CUDA device used by the PyTorch and Triton implementation.
   '''
 
-  selected_backend = _parse_backend(backend)
-
   # compute sdf
-  sdf = _compute_grid(vertices, faces, size, selected_backend, device)
+  sdf = _compute_grid(vertices, faces, size, device)
   if not fix:
     return (sdf, trimesh.Trimesh(vertices, faces)) if return_mesh else sdf
 
@@ -89,5 +53,5 @@ def compute(vertices: NDArray[np.generic], faces: NDArray[np.generic], size: int
   mesh.vertices = mesh.vertices * (2.0 / size) - 1.0  # normalize it to [-1, 1]
 
   # re-compute sdf
-  sdf = _compute_grid(mesh.vertices, mesh.faces, size, selected_backend, device)
+  sdf = _compute_grid(mesh.vertices, mesh.faces, size, device)
   return (sdf, mesh) if return_mesh else sdf

@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import json
+import os
 import statistics
 import subprocess
 import sys
@@ -26,10 +27,14 @@ import trimesh
 from numpy.typing import NDArray
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import mesh2sdf
-import mesh2sdf.core
+import mesh2sdf_triton
+from benchmarks.cpp_reference import ReferenceUnavailableError, compute_reference
 
-OBJAVERSE_ROOT: Final = Path("/home/rvi/ns3/jaehyeok/ds/Objaverse-full/glbs/000-082")
+OBJAVERSE_ROOT: Final = Path(
+    os.environ.get(
+        "OBJAVERSE_ROOT", "/home/rvi/ns3/jaehyeok/ds/Objaverse-full/glbs/000-082"
+    )
+)
 ACCURACY_TIER: Final = 1000.0
 MAX_ERROR: Final = 1e-3
 MEAN_ERROR: Final = 1e-5
@@ -112,13 +117,11 @@ def _measure(
 
 def _compare(spec: CaseSpec, size: int, timed: bool) -> ResultRow:
     vertices, faces = _load_case(spec)
-    start = time.perf_counter()
-    reference = mesh2sdf.core.compute(vertices, faces, size)
-    cpu_seconds = time.perf_counter() - start
+    reference, cpu_seconds = compute_reference(vertices, faces, size)
 
     def candidate() -> NDArray[np.float32]:
         return np.asarray(
-            mesh2sdf.compute(vertices, faces, size=size, backend="cuda"),
+            mesh2sdf_triton.compute(vertices, faces, size=size),
             dtype=np.float32,
         )
 
@@ -245,7 +248,7 @@ def main(argv: Sequence[str]) -> int:
         spec = _find_case(uid)
         try:
             row = _compare(spec, int(size), timed=timing == "timed")
-        except torch.AcceleratorError as error:
+        except (ReferenceUnavailableError, torch.AcceleratorError) as error:
             row = _failed_row(spec, int(size), str(error))
         print(json.dumps(row))
         return 0

@@ -1,9 +1,12 @@
 import os
 import sys
-import trimesh
-import mesh2sdf
-import numpy as np
 import time
+from typing import cast
+
+import numpy as np
+import trimesh
+
+import mesh2sdf_triton
 
 filename = sys.argv[1] if len(sys.argv) > 1 else  \
     os.path.join(os.path.dirname(__file__), 'data', 'plane.obj')
@@ -12,7 +15,7 @@ mesh_scale = 0.8
 size = 128
 level = 2 / size
 
-mesh = trimesh.load(filename, force='mesh')
+mesh = cast(trimesh.Trimesh, trimesh.load(filename, force='mesh'))
 
 # normalize mesh
 vertices = mesh.vertices
@@ -24,7 +27,7 @@ vertices = (vertices - center) * scale
 
 # fix mesh
 t0 = time.time()
-sdf, mesh = mesh2sdf.compute(
+sdf, mesh = mesh2sdf_triton.compute(
     vertices, mesh.faces, size, fix=True, level=level, return_mesh=True)
 t1 = time.time()
 
@@ -32,4 +35,4 @@ t1 = time.time()
 mesh.vertices = mesh.vertices / scale + center
 mesh.export(filename[:-4] + '.fixed.obj')
 np.save(filename[:-4] + '.npy', sdf)
-print('It takes %.4f seconds to process %s' % (t1-t0, filename))
+print(f"It takes {t1 - t0:.4f} seconds to process {filename}")

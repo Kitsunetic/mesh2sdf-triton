@@ -1,4 +1,4 @@
-"""Fixed end-to-end timing and C++ parity checks for the GPU experiments."""
+"""Fixed end-to-end timing and optional C++ parity checks for Mesh2SDF-Triton."""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ import trimesh
 from numpy.typing import NDArray
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-import mesh2sdf
-import mesh2sdf.core
+import mesh2sdf_triton
+from benchmarks.cpp_reference import compute_reference
 
 
 @dataclass(frozen=True, slots=True)
@@ -67,19 +67,31 @@ def measured_seconds(call: Callable[[], NDArray[np.float32]]) -> float:
     return statistics.median(samples)
 
 
+def measured_reference_seconds(
+    call: Callable[[], tuple[NDArray[np.float32], float]]
+) -> float:
+    samples: list[float] = []
+    for _ in range(3):
+        result, seconds = call()
+        if not np.isfinite(result).all():
+            raise FloatingPointError("SDF contains non-finite values")
+        samples.append(seconds)
+    return statistics.median(samples)
+
+
 def compute_candidate(case: Case, size: int) -> NDArray[np.float32]:
     return np.asarray(
-        mesh2sdf.compute(case.vertices, case.faces, size=size), dtype=np.float32
+        mesh2sdf_triton.compute(case.vertices, case.faces, size=size), dtype=np.float32
     )
 
 
 def verify() -> None:
     rows: list[dict[str, str | float | int]] = []
     for case in fixed_cases():
-        reference = partial(mesh2sdf.core.compute, case.vertices, case.faces, 128)
+        reference = partial(compute_reference, case.vertices, case.faces, 128)
         candidate = partial(compute_candidate, case, 128)
         candidate()  # Exclude the first JIT compilation, but no mesh preprocessing.
-        reference_seconds = measured_seconds(reference)
+        reference_seconds = measured_reference_seconds(reference)
         candidate_seconds = measured_seconds(candidate)
         rows.append(
             {
@@ -98,7 +110,7 @@ def guard() -> None:
     rows: list[dict[str, str | float | int]] = []
     for case in fixed_cases():
         for size in (32, 64):
-            reference = mesh2sdf.core.compute(case.vertices, case.faces, size)
+            reference, _ = compute_reference(case.vertices, case.faces, size)
             candidate = compute_candidate(case, size)
             assert candidate.shape == reference.shape
             assert candidate.dtype == np.float32
