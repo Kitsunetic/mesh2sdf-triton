@@ -22,6 +22,11 @@ _DIRECTIONS: Final = (
 )
 
 
+def _distance_norm(offset: Tensor) -> Tensor:
+    """Return a norm whose PyTorch subgradient is zero for zero vectors."""
+    return torch.linalg.vector_norm(offset, dim=-1)
+
+
 def _dot(left: Tensor, right: Tensor) -> Tensor:
     return (
         left[..., 0] * right[..., 0]
@@ -37,7 +42,7 @@ def _segment_distance(points: Tensor, start: Tensor, end: Tensor) -> Tensor:
     parameter = parameter.clamp(0.0, 1.0)
     closest = parameter.unsqueeze(-1) * start + (1.0 - parameter).unsqueeze(-1) * end
     offset = points - closest
-    return torch.sqrt(_dot(offset, offset))
+    return _distance_norm(offset)
 
 
 def _triangle_distance(points: Tensor, triangles: Tensor) -> Tensor:
@@ -67,7 +72,7 @@ def _triangle_distance(points: Tensor, triangles: Tensor) -> Tensor:
         + first_second_weight.unsqueeze(-1) * third
     )
     plane_offset = points - plane_point
-    plane_distance = torch.sqrt(_dot(plane_offset, plane_offset))
+    plane_distance = _distance_norm(plane_offset)
     first_second_distance = _segment_distance(points, first, second)
     first_third_distance = _segment_distance(points, first, third)
     second_third_distance = _segment_distance(points, second, third)

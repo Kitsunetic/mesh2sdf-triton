@@ -51,9 +51,20 @@ def compute_cuda(
         raise CudaBackendUnavailableError("CUDA is not available")
     vertex_tensor = torch.as_tensor(vertices, dtype=torch.float32, device=device)
     face_tensor = torch.as_tensor(faces.astype(np.int64, copy=False), device=device)
-    triangles = vertex_tensor[face_tensor].contiguous()
+    result, _ = compute_cuda_tensor(vertex_tensor, face_tensor, size)
+    return result.cpu().numpy()
+
+
+def compute_cuda_tensor(
+    vertices: Tensor, faces: Tensor, size: int
+) -> tuple[Tensor, Tensor]:
+    """Run the forward kernels and retain closest-triangle IDs for backward."""
+    if not is_available() or not vertices.is_cuda:
+        raise CudaBackendUnavailableError("a CUDA vertex tensor is required")
+    face_tensor = faces.to(device=vertices.device, dtype=torch.long)
+    triangles = vertices[face_tensor].contiguous()
     bounds, sign_bounds = _triangle_bounds(triangles, size)
     result, closest = initialize_distance_grid(triangles, bounds, size)
     sweep_distances(triangles, result, closest, size)
-    apply_signs(triangles, sign_bounds, result, size)
-    return result.reshape(size, size, size).cpu().numpy()
+    _ = apply_signs(triangles, sign_bounds, result, size)
+    return result.reshape(size, size, size), closest
