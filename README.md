@@ -5,6 +5,9 @@ distance fields from watertight meshes. It uses PyTorch and Triton for the
 distance initialization, fast sweeping, and sign pass. Its distribution name
 is `mesh2sdf-triton`; its Python import is `mesh2sdf_triton`.
 
+Alongside the NumPy-compatible API, it provides a differentiable CUDA Tensor
+API for optimizing mesh vertex positions through an SDF loss.
+
 It is derived from [Mesh2SDF](https://github.com/wang-ps/mesh2sdf), but it does
 not bundle the original C++ extension, pybind11 bindings, or a CPU fallback.
 Use the original project when a CPU implementation is required.
@@ -37,6 +40,7 @@ package.
 | Execution | Single-core C++ CPU | CUDA GPU through PyTorch and Triton |
 | Installation | Builds a pybind11 extension | Installs Python/Triton sources only |
 | GPU kernels | None | Triangle-local distance updates, fast sweep, and projected sign traversal |
+| Vertex gradients | None | Differentiable Tensor API with a custom Triton backward |
 | CPU fallback | Available | Not included |
 | Python import | `mesh2sdf` | `mesh2sdf_triton` |
 
@@ -93,6 +97,34 @@ The `device` argument accepts PyTorch CUDA device strings. `fix=True` retains
 the original mesh-repair workflow and can return the repaired mesh with
 `return_mesh=True`.
 
+### Differentiable Tensor API
+
+`compute_triton` accepts CUDA tensors and returns an SDF connected to the
+PyTorch Autograd graph. It supports gradients with respect to the mesh vertex
+positions, making it suitable for mesh fitting and other SDF-based optimization
+loops.
+
+```python
+import torch
+import mesh2sdf_triton
+
+vertices = torch.tensor(
+    mesh_vertices, dtype=torch.float32, device="cuda", requires_grad=True
+)
+faces = torch.tensor(mesh_faces, dtype=torch.int64, device="cuda")
+
+sdf = mesh2sdf_triton.compute_triton(vertices, faces, size=128)
+loss = sdf.square().mean()
+loss.backward()
+
+vertex_gradients = vertices.grad
+```
+
+The backward holds the forward-selected closest face, edge, or vertex and the
+parity sign fixed. This is the usual piecewise SDF subgradient; gradients are
+undefined where the closest feature or parity changes. At exactly zero
+unsigned distance, Mesh2SDF-Triton returns a finite zero subgradient.
+
 ## Examples
 
 Generate an SDF from a mesh file. The example normalizes the mesh to the input
@@ -123,6 +155,9 @@ face-dependent work onto the GPU:
 3. Two passes of eight-direction fast sweeping fill the distance field.
 4. A projected-triangle YZ traversal counts X intersections before applying
    parity signs.
+5. The differentiable Tensor API keeps the selected triangle from the forward
+   pass, then a Triton backward re-evaluates its fixed closest feature and
+   atomic-accumulates vertex gradients.
 
 The projected sign traversal avoids evaluating every face against every grid
 line. For the 332,820-face benchmark above, it reduces the candidate set from
