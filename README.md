@@ -25,6 +25,33 @@ JIT-compiles kernels when they are first used for a GPU configuration, then
 reuses them on later calls.
 
 
+## Performance
+
+The table below compares the original C++ backend with the CUDA backend on
+four normalized watertight Objaverse meshes at `size=128`. Measurements use
+PyTorch 2.11.0, Triton 3.6.0, CUDA 12.8, and an NVIDIA RTX 3090. CUDA timings
+are post-warmup end-to-end calls; they include host/device data movement and
+exclude Triton's one-time compilation cost.
+
+| Faces | C++ CPU | CUDA GPU | Speedup | Max absolute error | Sign errors |
+| ---: | ---: | ---: | ---: | ---: | ---: |
+| 236 | 8.020 s | 0.236 s | 34.04x | 1.79e-7 | 0 |
+| 5,120 | 8.662 s | 0.238 s | 36.36x | 1.71e-5 | 0 |
+| 51,748 | 8.463 s | 0.238 s | 35.61x | 1.19e-7 | 0 |
+| 332,820 | 10.821 s | 0.248 s | 43.65x | 9.52e-4 | 0 |
+
+The benchmark checks finite outputs, a maximum error no greater than `1e-3`,
+mean error no greater than `1e-5`, and zero sign mismatches against the C++
+backend. Reproduce it with:
+
+```shell
+python -B benchmarks/objaverse_scaling.py verify
+```
+
+Set `OBJAVERSE_ROOT` in that script to a local directory containing the
+benchmark GLB files before running it.
+
+
 ## Install
 
 `mesh2sdf` depends on [pybind11](https://github.com/pybind/pybind11), and C++
@@ -66,33 +93,6 @@ sdf = mesh2sdf.compute(
 Use `backend="cpu"` for the original C++ implementation. `backend="cuda"`
 raises an error if CUDA acceleration is unavailable, which is useful in batch
 preprocessing jobs that must not silently fall back to CPU.
-
-
-## Performance
-
-The table below compares the original C++ backend with the CUDA backend on
-four normalized watertight Objaverse meshes at `size=128`. Measurements use
-PyTorch 2.11.0, Triton 3.6.0, CUDA 12.8, and an NVIDIA RTX 3090. CUDA timings
-are post-warmup end-to-end calls; they include host/device data movement and
-exclude Triton's one-time compilation cost.
-
-| Faces | C++ CPU | CUDA GPU | Speedup | Max absolute error | Sign errors |
-| ---: | ---: | ---: | ---: | ---: | ---: |
-| 236 | 8.020 s | 0.236 s | 34.04x | 1.79e-7 | 0 |
-| 5,120 | 8.662 s | 0.238 s | 36.36x | 1.71e-5 | 0 |
-| 51,748 | 8.463 s | 0.238 s | 35.61x | 1.19e-7 | 0 |
-| 332,820 | 10.821 s | 0.248 s | 43.65x | 9.52e-4 | 0 |
-
-The benchmark checks finite outputs, a maximum error no greater than `1e-3`,
-mean error no greater than `1e-5`, and zero sign mismatches against the C++
-backend. Reproduce it with:
-
-```shell
-python -B benchmarks/objaverse_scaling.py verify
-```
-
-Set `OBJAVERSE_ROOT` in that script to a local directory containing the
-benchmark GLB files before running it.
 
 
 ## Why large meshes stay fast
