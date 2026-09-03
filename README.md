@@ -1,136 +1,131 @@
 # Mesh2SDF-Triton
 
-Mesh2SDF-Triton is a GPU-accelerated fork of
-[Mesh2SDF](https://github.com/wang-ps/mesh2sdf). It keeps the original public
-API and C++ backend, and adds a PyTorch + Triton backend for fast signed
-distance-field generation from watertight meshes.
+Mesh2SDF-Triton is a standalone, GPU-only library for generating signed
+distance fields from watertight meshes. It uses PyTorch and Triton for the
+distance initialization, fast sweeping, and sign pass. Its distribution name
+is `mesh2sdf-triton`; its Python import is `mesh2sdf_triton`.
 
-The original project is a robust CPU implementation of SDFGen-style sweeping.
-This fork targets the preprocessing use case where many `size=128` grids must
-be generated from large meshes on a CUDA machine.
-
-
-## What changes from Mesh2SDF?
-
-| Area | Original Mesh2SDF | Mesh2SDF-Triton |
-| --- | --- | --- |
-| Accelerated backend | C++ CPU | PyTorch + Triton CUDA kernels |
-| Distance initialization | CPU triangle/voxel loops | GPU triangle-local narrow-band updates |
-| Sign computation | CPU ray-intersection counting | GPU projected-triangle intersection counting |
-| Large-mesh scaling | Work increases with face count on one CPU core | Face-dependent work stays on the GPU and is bounded by triangle grid coverage |
-| Compatibility | Original behavior | `backend="cpu"` preserves the original C++ path |
-
-The CUDA backend needs no custom CUDA extension and no `nvcc` build. Triton
-JIT-compiles kernels when they are first used for a GPU configuration, then
-reuses them on later calls.
-
+It is derived from [Mesh2SDF](https://github.com/wang-ps/mesh2sdf), but it does
+not bundle the original C++ extension, pybind11 bindings, or a CPU fallback.
+Use the original project when a CPU implementation is required.
 
 ## Performance
 
-The table below compares the original C++ backend with the CUDA backend on
+The table compares Mesh2SDF-Triton with the original Mesh2SDF C++ package on
 four normalized watertight Objaverse meshes at `size=128`. Measurements use
-PyTorch 2.11.0, Triton 3.6.0, CUDA 12.8, and an NVIDIA RTX 3090. CUDA timings
-are post-warmup end-to-end calls; they include host/device data movement and
-exclude Triton's one-time compilation cost.
+PyTorch 2.11.0, Triton 3.6.0, CUDA 12.8, and an NVIDIA RTX 3090. GPU timings
+are post-warmup end-to-end calls, including host/device transfer and excluding
+Triton's first-use JIT compilation.
 
-| Faces | C++ CPU | CUDA GPU | Speedup | Max absolute error | Sign errors |
+| Faces | Original C++ CPU | Triton GPU | Speedup | Max absolute error | Sign errors |
 | ---: | ---: | ---: | ---: | ---: | ---: |
 | 236 | 8.020 s | 0.236 s | 34.04x | 1.79e-7 | 0 |
 | 5,120 | 8.662 s | 0.238 s | 36.36x | 1.71e-5 | 0 |
 | 51,748 | 8.463 s | 0.238 s | 35.61x | 1.19e-7 | 0 |
 | 332,820 | 10.821 s | 0.248 s | 43.65x | 9.52e-4 | 0 |
 
-The benchmark checks finite outputs, a maximum error no greater than `1e-3`,
-mean error no greater than `1e-5`, and zero sign mismatches against the C++
-backend. Reproduce it with:
+The comparison accepts finite output, a maximum error at most `1e-3`, mean
+error at most `1e-5`, and no reliable sign mismatches against the original
+implementation. The original package is only a development-time reference:
+it runs in a separate Python environment and is never a dependency of this
+package.
 
-```shell
-python -B benchmarks/objaverse_scaling.py verify
-```
+## How it differs from Mesh2SDF
 
-Set `OBJAVERSE_ROOT` in that script to a local directory containing the
-benchmark GLB files before running it.
+| Area | Mesh2SDF | Mesh2SDF-Triton |
+| --- | --- | --- |
+| Execution | Single-core C++ CPU | CUDA GPU through PyTorch and Triton |
+| Installation | Builds a pybind11 extension | Installs Python/Triton sources only |
+| GPU kernels | None | Triangle-local distance updates, fast sweep, and projected sign traversal |
+| CPU fallback | Available | Not included |
+| Python import | `mesh2sdf` | `mesh2sdf_triton` |
 
+Triton compiles its kernels on their first use for a GPU configuration and
+caches them. There is no project-specific CUDA extension, no `nvcc` step, and
+no C++ compiler requirement during installation.
 
 ## Install
 
-`mesh2sdf` depends on [pybind11](https://github.com/pybind/pybind11), and C++
-compilers are needed to build the code. Supported compilers are listed
-[here](https://github.com/pybind/pybind11#supported-compilers).
+Mesh2SDF-Triton requires Linux, an NVIDIA GPU, a CUDA-capable PyTorch build,
+and Triton. Install the PyTorch build appropriate for the system first, then
+install this package:
 
-Clone this repository because the upstream PyPI package does not include the
-Triton backend:
+```shell
+pip install torch
+pip install mesh2sdf-triton
+```
+
+To install from a checkout:
 
 ```shell
 git clone https://github.com/Kitsunetic/mesh2sdf-triton.git
 cd mesh2sdf-triton
-pip install ".[cuda]"
+pip install .
 ```
 
-The package still builds the original pybind11 C++ extension, so a supported C++
-compiler is required. CUDA acceleration requires Linux, a CUDA-capable PyTorch
-installation, and Triton.
+Neither command builds C++ code or requires pybind11.
 
+## Usage
 
-## Use the accelerated backend
-
-Vertices must be normalized to `[-1, 1]`, as in the original project. For grids
-of size 64 or larger, `backend="auto"` selects CUDA when PyTorch, Triton, and a
-CUDA device are available.
+Vertices must be normalized to `[-1, 1]`.
 
 ```python
-import mesh2sdf
+import mesh2sdf_triton
 
-sdf = mesh2sdf.compute(
+sdf = mesh2sdf_triton.compute(
     vertices,
     faces,
     size=128,
-    backend="cuda",
     device="cuda:0",
 )
 ```
 
-Use `backend="cpu"` for the original C++ implementation. `backend="cuda"`
-raises an error if CUDA acceleration is unavailable, which is useful in batch
-preprocessing jobs that must not silently fall back to CPU.
+`compute` returns a NumPy `float32` array. CUDA availability is required; the
+call raises an error when the selected device cannot execute the Triton path.
+The `device` argument accepts PyTorch CUDA device strings. `fix=True` retains
+the original mesh-repair workflow and can return the repaired mesh with
+`return_mesh=True`.
 
+## Implementation
 
-## Why large meshes stay fast
+Mesh2SDF-Triton preserves the SDFGen-style construction while moving the
+face-dependent work onto the GPU:
 
-Mesh2SDF-Triton follows the same SDFGen-style result construction as the C++
-backend, but changes where the expensive work happens.
+1. Triangle bounds are derived from GPU-resident triangles using C++-compatible
+   grid rounding.
+2. A triangle-local narrow-band kernel initializes nearest distances with a
+   packed atomic minimum that also records the nearest triangle.
+3. Two passes of eight-direction fast sweeping fill the distance field.
+4. A projected-triangle YZ traversal counts X intersections before applying
+   parity signs.
 
-1. Triangle bounds are computed from the already-uploaded triangle tensor on
-   the GPU. Float64 arithmetic preserves the C++ grid rounding rules.
-2. Distance initialization visits only the inclusive AABB around each triangle,
-   rather than evaluating every triangle at every grid voxel. A packed atomic
-   minimum selects both the nearest distance and its triangle consistently.
-3. The original eight-direction fast sweep fills the remaining grid values in
-   the same dependency order as the C++ implementation.
-4. The sign pass visits only grid lines within a triangle's YZ projection. This
-   avoids launching `face_count × size²` intersection tests; the 332,820-face
-   benchmark reduces that candidate set from 5.45 billion pairs to 12,861
-   projected cells.
+The projected sign traversal avoids evaluating every face against every grid
+line. For the 332,820-face benchmark above, it reduces the candidate set from
+5.45 billion face/line pairs to 12,861 projected cells.
 
+## Accuracy and reference benchmarks
 
-## Accuracy and scope
+The signed path is intended for watertight meshes. For non-watertight input,
+use `fix=True` before relying on signs.
 
-The accelerated signed-distance path is benchmarked on watertight meshes. It
-uses the original C++ implementation as its reference, with the error limits
-listed above. For non-watertight input, signed values are not reliable before
-repair in either backend; use `fix=True` to retain the original repair pipeline.
+The repository's parity and Objaverse benchmarks can compare against an
+independently installed original Mesh2SDF. Set
+`MESH2SDF_REFERENCE_PYTHON` to the interpreter in that environment so the
+reference runs in a subprocess and cannot become a package dependency:
 
-Small grids (`size < 64`) use the C++ backend because CUDA launch overhead can
-exceed the work saved. Keep `backend="cpu"` available for CPU-only hosts and
-for a direct reference result.
+```shell
+MESH2SDF_REFERENCE_PYTHON=/path/to/original-mesh2sdf/bin/python \
+  python -B benchmarks/objaverse_scaling.py verify
+```
 
+Set `OBJAVERSE_ROOT` to the directory containing the benchmark GLB files when
+it differs from the script's default.
 
 ## Original project
 
 Mesh2SDF-Triton is derived from Mesh2SDF by Peng-Shuai Wang. The original
 project introduced the mesh repair and SDF workflow used here and is described
 in the paper below.
-
 
 ## Citation
 
@@ -144,5 +139,4 @@ in the paper below.
   number     = {4},
   year       = {2022},
 }
-
 ```
