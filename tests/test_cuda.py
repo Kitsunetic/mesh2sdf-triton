@@ -1,3 +1,5 @@
+import inspect
+
 import numpy as np
 import pytest
 import torch
@@ -8,7 +10,7 @@ from benchmarks.autoresearch import Case, fixed_cases
 from mesh2sdf_triton._distance import initialize_distance_grid
 
 
-def test_triangle_bounds_match_cpp_rounding_and_clamping() -> None:
+def test_triangle_bounds_preserve_grid_rounding_and_clamping() -> None:
     # Given float32 triangle coordinates whose YZ extent crosses both grid edges
     triangles = torch.tensor(
         [[[-0.5, -0.75, -1.5], [0.0, -0.25, 0.0], [0.5, 0.25, 1.5]]],
@@ -18,7 +20,7 @@ def test_triangle_bounds_match_cpp_rounding_and_clamping() -> None:
     # When distance and sign bounds are computed in grid coordinates
     distance, sign = cuda_backend._triangle_bounds(triangles, size=8)
 
-    # Then C++ trunc/ceil/floor rules and clamping are preserved
+    # Then the expected truncation, ceil, floor, and clamping rules are preserved
     torch.testing.assert_close(
         distance, torch.tensor([[1, 7, 0, 7, 0, 7]], dtype=torch.int32)
     )
@@ -29,7 +31,7 @@ def test_triangle_bounds_match_cpp_rounding_and_clamping() -> None:
 @pytest.mark.parametrize("case", fixed_cases(), ids=lambda case: case.name)
 @pytest.mark.parametrize("size", (8, 16, 32, 64))
 def test_public_cuda_api_runs_for_watertight_meshes(case: Case, size: int) -> None:
-    # Given a watertight mesh at a grid size formerly redirected to C++
+    # Given a watertight mesh and a requested CUDA grid size
 
     # When the standalone public API computes its SDF
     result = mesh2sdf_triton.compute(case.vertices, case.faces, size=size)
@@ -39,6 +41,13 @@ def test_public_cuda_api_runs_for_watertight_meshes(case: Case, size: int) -> No
     assert result.dtype == np.float32
     assert result.shape == (size, size, size)
     assert np.isfinite(result).all()
+
+
+def test_public_api_exposes_no_cpu_backend() -> None:
+    parameters = inspect.signature(mesh2sdf_triton.compute).parameters
+
+    assert "backend" not in parameters
+    assert parameters["device"].default == "cuda"
 
 
 @pytest.mark.skipif(not torch.cuda.is_available(), reason="CUDA is required")

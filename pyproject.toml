@@ -1,10 +1,47 @@
 [build-system]
 requires = [
-    "setuptools>=69",
+    "setuptools>=77",
     "wheel",
 ]
 
 build-backend = "setuptools.build_meta"
+
+[project]
+name = "mesh2sdf-triton"
+version = "2.0.0"
+description = "GPU signed-distance fields from watertight meshes with PyTorch and Triton"
+readme = "README.md"
+requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Peng-Shuai Wang", email = "wangps@hotmail.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: POSIX :: Linux",
+]
+dependencies = [
+    "numpy",
+    "scikit-image",
+    "torch>=2.2",
+    "trimesh",
+    "triton>=2.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "basedpyright",
+    "pytest",
+    "ruff",
+]
+
+[project.urls]
+Homepage = "https://github.com/Kitsunetic/mesh2sdf-triton"
+Repository = "https://github.com/Kitsunetic/mesh2sdf-triton"
+
+[tool.setuptools.packages.find]
+include = ["mesh2sdf_triton*"]
 
 [tool.basedpyright]
 venvPath = "."
