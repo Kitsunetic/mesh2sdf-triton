@@ -12,6 +12,14 @@ It is derived from [Mesh2SDF](https://github.com/wang-ps/mesh2sdf), but it does
 not bundle the original C++ extension, pybind11 bindings, or a CPU fallback.
 Use the original project when a CPU implementation is required.
 
+## At a glance
+
+| Capability | Mesh2SDF | Mesh2SDF-Triton |
+| --- | :---: | :---: |
+| High-throughput GPU acceleration | X | O |
+| Parallel GPU execution | X | O |
+| Differentiable vertex gradients | X | O |
+
 ## Performance
 
 The table compares Mesh2SDF-Triton with the original Mesh2SDF C++ package on
