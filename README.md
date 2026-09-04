@@ -1,9 +1,9 @@
 # Mesh2SDF-Triton
 
-Mesh2SDF-Triton is a standalone, GPU-only library for generating signed
-distance fields from watertight meshes. It uses PyTorch and Triton for the
-distance initialization, fast sweeping, and sign pass. Its distribution name
-is `mesh2sdf-triton`; its Python import is `mesh2sdf_triton`.
+Mesh2SDF-Triton is a standalone, GPU-only, differentiable library for
+generating signed distance fields from watertight meshes. It uses PyTorch and
+Triton for the distance initialization, fast sweeping, and sign pass. Its
+distribution name is `mesh2sdf-triton`; its Python import is `mesh2sdf_triton`.
 
 Alongside the NumPy-compatible API, it provides a differentiable CUDA Tensor
 API for optimizing mesh vertex positions through an SDF loss.
@@ -12,13 +12,17 @@ It is derived from [Mesh2SDF](https://github.com/wang-ps/mesh2sdf), but it does
 not bundle the original C++ extension, pybind11 bindings, or a CPU fallback.
 Use the original project when a CPU implementation is required.
 
+> **Differentiable mesh optimization:** `compute_triton` returns an SDF in the
+> PyTorch Autograd graph, with gradients for its input vertex positions. Use it
+> directly in SDF-based fitting and optimization losses.
+
 ## At a glance
 
 | Capability | Mesh2SDF | Mesh2SDF-Triton |
 | --- | :---: | :---: |
 | High-throughput GPU acceleration | X | O |
 | Parallel GPU execution | X | O |
-| Differentiable vertex gradients | X | O |
+| **Differentiable vertex gradients** | X | **O** |
 
 ## Performance
 
@@ -105,7 +109,7 @@ The `device` argument accepts PyTorch CUDA device strings. `fix=True` retains
 the original mesh-repair workflow and can return the repaired mesh with
 `return_mesh=True`.
 
-### Differentiable Tensor API
+### Differentiable GPU Tensor API
 
 `compute_triton` accepts CUDA tensors and returns an SDF connected to the
 PyTorch Autograd graph. It supports gradients with respect to the mesh vertex
